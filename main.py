@@ -38,6 +38,7 @@ class DeviceConfig:
 
 @dataclass(frozen=True)
 class AppConfig:
+    debug: bool
     mqtt: MQTTConfig
     devices: list[DeviceConfig]
 
@@ -96,6 +97,7 @@ def load_config() -> AppConfig:
         )
 
     return AppConfig(
+        debug=bool(raw_config.get("debug", False)),
         mqtt=MQTTConfig(
             host=str(mqtt_config.get("host", "localhost")),
             port=int(mqtt_config.get("port", 1883)),
@@ -169,6 +171,15 @@ def build_metric() -> Gauge:
     )
 
 
+def log_info(message: str) -> None:
+    print(message)
+
+
+def log_debug(message: str) -> None:
+    if config.debug:
+        print(f"🐞 {message}")
+
+
 def create_mqtt_client() -> mqtt.Client:
     callback_api_version = getattr(mqtt, "CallbackAPIVersion", None)
     if callback_api_version is not None:
@@ -180,11 +191,19 @@ config = load_config()
 state = load_state([device.topic for device in config.devices])
 local_tz = pytz.timezone("Asia/Kolkata")
 corrected = build_metric()
+mqtt_connected = Gauge("tasmota_mqtt_connected", "MQTT connection status")
+mqtt_last_message = Gauge("tasmota_mqtt_last_message_unixtime", "Last MQTT message timestamp")
 device_by_topic = {device.topic: device for device in config.devices}
 device_metrics = {}
 
 start_http_server(METRICS_PORT)
-print(f"🚀 /metrics exposed on :{METRICS_PORT}")
+log_info(f"🚀 /metrics exposed on :{METRICS_PORT}")
+log_info(f"🧩 Loaded config for {len(config.devices)} device(s) from config.yaml")
+log_debug(f"MQTT broker: {config.mqtt.host}:{config.mqtt.port}")
+for device in config.devices:
+    log_debug(
+        f"Device loaded: name={device.name}, topic={device.topic}, ip={device.ip or '-'}"
+    )
 
 for device in config.devices:
     device_metrics[device.topic] = corrected.labels(
@@ -205,14 +224,17 @@ def on_connect(
     properties: Any = None,
 ) -> None:
     if reason_code != 0:
-        print(f"⚠️ MQTT connect failed with reason code: {reason_code}")
+        mqtt_connected.set(0)
+        log_info(f"⚠️ MQTT connect failed with reason code: {reason_code}")
         return
 
-    print("✅ MQTT connected")
+    mqtt_connected.set(1)
+    log_info("✅ MQTT connected")
     for device in config.devices:
         topic = f"tele/{device.topic}/SENSOR"
         client.subscribe(topic)
-        print(f"📡 Subscribed to {topic}")
+        log_info(f"📡 Subscribed to {topic}")
+        log_debug(f"Subscription target device={device.name}")
 
 
 def on_disconnect(
@@ -221,7 +243,8 @@ def on_disconnect(
     reason_code: Any,
     properties: Any = None,
 ) -> None:
-    print(f"⚠️ MQTT disconnected: {reason_code}")
+    mqtt_connected.set(0)
+    log_info(f"⚠️ MQTT disconnected: {reason_code}")
 
 
 def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> None:
@@ -229,20 +252,23 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
 
     now = datetime.now(local_tz)
     last_update = now
+    mqtt_last_message.set(now.timestamp())
     hour_now = now.hour
 
     device_topic = extract_topic(msg.topic)
     if not device_topic or device_topic not in device_by_topic:
-        print("⚠️ Ignoring message for unknown topic:", msg.topic)
+        log_info(f"⚠️ Ignoring message for unknown topic: {msg.topic}")
         return
 
     device = device_by_topic[device_topic]
     device_state = state["devices"].setdefault(device_topic, default_device_state())
 
     try:
+        log_debug(f"Incoming message topic={msg.topic}, bytes={len(msg.payload)}")
         payload = json.loads(msg.payload.decode())
+        log_debug(f"Decoded payload for {device.name}: {payload}")
         if "ENERGY" not in payload:
-            print("⚠️ No ENERGY data in payload:", payload)
+            log_info(f"⚠️ No ENERGY data in payload: {payload}")
             return
 
         today = float(payload["ENERGY"].get("Today", 0.0))
@@ -254,7 +280,7 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
                 device_state["carry"] += device_state["last"]
                 device_state["apply_correction"] = True
                 corrected_today = device_state["carry"] + today
-                print(
+                log_info(
                     f"⚡ Reset detected for {device.name}. "
                     f"Carry={device_state['carry']}, Raw={repr(today)}"
                 )
@@ -262,26 +288,26 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
                 corrected_today = device_state["carry"] + today
                 device_state["apply_correction"] = False
             else:
-                print(
+                log_debug(
                     f"📦 {device.name}: today={today}, corrected={corrected_today}, "
                     f"carry={device_state['carry']}, last={device_state['last']}"
                 )
         else:
-            print(f"✅ {device.name}: normal tracking at {hour_now:02d}:00")
-            print(f"📈 Raw today: {today}")
-            print(f"✅ Corrected: {corrected_today}")
+            log_info(f"✅ {device.name}: normal tracking at {hour_now:02d}:00")
+            log_info(f"📈 Raw today: {today}")
+            log_info(f"✅ Corrected: {corrected_today}")
 
         device_metrics[device_topic].set(corrected_today)
         device_state["last"] = today
 
         if hour_now == 0:
-            print(f"🕛 Midnight reset for {device.name}")
+            log_info(f"🕛 Midnight reset for {device.name}")
             device_state["carry"] = 0.0
             device_state["apply_correction"] = False
 
         save_state(state)
     except Exception as exc:
-        print("💥 Error in message handler:", exc)
+        log_info(f"💥 Error in message handler: {exc}")
 
 client = create_mqtt_client()
 if config.mqtt.username and config.mqtt.password:
@@ -293,7 +319,8 @@ client.on_message = on_message
 client.reconnect_delay_set(min_delay=2, max_delay=60)
 client.connect_async(config.mqtt.host, config.mqtt.port, 60)
 client.loop_start()
-print(f"🚀 Connecting to MQTT broker at {config.mqtt.host}:{config.mqtt.port}")
+log_info(f"🚀 Connecting to MQTT broker at {config.mqtt.host}:{config.mqtt.port}")
+log_debug(f"Config debug mode is enabled; will log decoded MQTT payloads and state transitions")
 
 try:
     while True:

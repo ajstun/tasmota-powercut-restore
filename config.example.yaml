@@ -1,3 +1,5 @@
+debug: false
+
 mqtt:
   host: <mqtt-broker-host>
   port: 1883

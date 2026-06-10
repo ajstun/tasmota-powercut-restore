@@ -26,6 +26,7 @@ docker compose up -d
 
 If the MQTT broker is down when the container starts, the exporter stays up and keeps retrying until the broker is reachable.
 If you use Unraid, keep the stack image-only; `build:` makes it try a local build and look for a Dockerfile in the appdata path.
+Set `debug: true` in `config.yaml` to print MQTT connect/disconnect events, subscriptions, payload sizes, decoded payloads, and device state changes.
 
 ## Adding a device once
 
@@ -59,3 +60,5 @@ Optional metadata:
 ## Prometheus metric
 
 - `tasmota_energy_today_corrected{device,topic,ip}`
+- `tasmota_mqtt_connected`
+- `tasmota_mqtt_last_message_unixtime`
