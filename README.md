@@ -24,6 +24,8 @@ docker compose pull
 docker compose up -d
 ```
 
+If the MQTT broker is down when the container starts, the exporter stays up and keeps retrying until the broker is reachable.
+
 ## Adding a device once
 
 Add one entry under `devices:` and restart the service:

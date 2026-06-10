@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
@@ -168,6 +169,13 @@ def build_metric() -> Gauge:
     )
 
 
+def create_mqtt_client() -> mqtt.Client:
+    callback_api_version = getattr(mqtt, "CallbackAPIVersion", None)
+    if callback_api_version is not None:
+        return mqtt.Client(callback_api_version=callback_api_version.VERSION2)
+    return mqtt.Client()
+
+
 config = load_config()
 state = load_state([device.topic for device in config.devices])
 local_tz = pytz.timezone("Asia/Kolkata")
@@ -187,6 +195,33 @@ for device in config.devices:
     device_metrics[device.topic].set(0.0)
 
 last_update = datetime.now(local_tz)
+
+
+def on_connect(
+    client: mqtt.Client,
+    userdata: Any,
+    flags: Any,
+    reason_code: Any,
+    properties: Any = None,
+) -> None:
+    if reason_code != 0:
+        print(f"⚠️ MQTT connect failed with reason code: {reason_code}")
+        return
+
+    print("✅ MQTT connected")
+    for device in config.devices:
+        topic = f"tele/{device.topic}/SENSOR"
+        client.subscribe(topic)
+        print(f"📡 Subscribed to {topic}")
+
+
+def on_disconnect(
+    client: mqtt.Client,
+    userdata: Any,
+    reason_code: Any,
+    properties: Any = None,
+) -> None:
+    print(f"⚠️ MQTT disconnected: {reason_code}")
 
 
 def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> None:
@@ -248,16 +283,23 @@ def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> Non
     except Exception as exc:
         print("💥 Error in message handler:", exc)
 
-
-client = mqtt.Client()
+client = create_mqtt_client()
 if config.mqtt.username and config.mqtt.password:
     client.username_pw_set(config.mqtt.username, config.mqtt.password)
 
+client.on_connect = on_connect
+client.on_disconnect = on_disconnect
 client.on_message = on_message
-client.connect(config.mqtt.host, config.mqtt.port, 60)
+client.reconnect_delay_set(min_delay=2, max_delay=60)
+client.connect_async(config.mqtt.host, config.mqtt.port, 60)
+client.loop_start()
+print(f"🚀 Connecting to MQTT broker at {config.mqtt.host}:{config.mqtt.port}")
 
-for device in config.devices:
-    client.subscribe(f"tele/{device.topic}/SENSOR")
-    print(f"📡 Subscribed to tele/{device.topic}/SENSOR")
-
-client.loop_forever()
+try:
+    while True:
+        time.sleep(1)
+except KeyboardInterrupt:
+    print("👋 Shutting down")
+finally:
+    client.loop_stop()
+    client.disconnect()
