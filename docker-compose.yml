@@ -1,14 +1,10 @@
 services:
   tasmota_corrected_exporter:
+    image: ghcr.io/ajstun/tasmota-powercut-restore:latest
     build: .
     restart: always
-    environment:
-      PROM_URL: http://192.168.1.XXX:9090
-      TASMOTA_TOPIC: tasmota_E2E13F
-      MQTT_HOST: 192.168.1.XXX #do not include http:// if ip-address
-      MQTT_PORT: 1883
-      MQTT_USER: USERNAME
     volumes:
-      - /data:/data
+      - ./data:/data
+      - ./config.yaml:/app/config.yaml:ro
     ports:
       - "9500:9500"

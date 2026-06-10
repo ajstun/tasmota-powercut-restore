@@ -1,3 +1,4 @@
 prometheus_client
 paho_mqtt
 pytz
+PyYAML

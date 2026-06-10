@@ -1,0 +1,19 @@
+mqtt:
+  host: <mqtt-broker-host>
+  port: 1883
+  username: <mqtt-username>
+  password: <mqtt-password>
+
+devices:
+  - name: kitchen-plug
+    topic: tasmota_kitchen
+    ip: <device-ip>
+    auth:
+      username: <device-username>
+      password: <device-password>
+  - name: bedroom-plug
+    topic: tasmota_bedroom
+    ip: <device-ip>
+    auth:
+      username: <device-username>
+      password: <device-password>

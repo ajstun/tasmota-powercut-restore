@@ -4,3 +4,5 @@ main.py~
 docker-compose.yml
 docker-compose.yml~
 docker-compose.yml
+config.yaml
+data/
