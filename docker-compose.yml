@@ -1,7 +1,6 @@
 services:
   tasmota_corrected_exporter:
     image: ghcr.io/ajstun/tasmota-powercut-restore:latest
-    build: .
     restart: always
     volumes:
       - ./data:/data

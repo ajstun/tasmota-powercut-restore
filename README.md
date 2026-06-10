@@ -25,6 +25,7 @@ docker compose up -d
 ```
 
 If the MQTT broker is down when the container starts, the exporter stays up and keeps retrying until the broker is reachable.
+If you use Unraid, keep the stack image-only; `build:` makes it try a local build and look for a Dockerfile in the appdata path.
 
 ## Adding a device once
 
