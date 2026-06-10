@@ -99,7 +99,7 @@ def load_config() -> AppConfig:
     return AppConfig(
         debug=bool(raw_config.get("debug", False)),
         mqtt=MQTTConfig(
-            host=str(mqtt_config.get("host", "localhost")),
+            host=str(mqtt_config.get("host", "")).strip(),
             port=int(mqtt_config.get("port", 1883)),
             username=mqtt_config.get("username"),
             password=mqtt_config.get("password"),
@@ -180,6 +180,10 @@ def log_debug(message: str) -> None:
         print(f"🐞 {message}")
 
 
+def warn(message: str) -> None:
+    print(f"⚠️ {message}")
+
+
 def create_mqtt_client() -> mqtt.Client:
     callback_api_version = getattr(mqtt, "CallbackAPIVersion", None)
     if callback_api_version is not None:
@@ -188,6 +192,13 @@ def create_mqtt_client() -> mqtt.Client:
 
 
 config = load_config()
+if not config.mqtt.host:
+    raise ValueError("mqtt.host is required in config.yaml")
+if config.mqtt.host in {"localhost", "127.0.0.1"}:
+    warn(
+        f"mqtt.host is set to {config.mqtt.host}; inside Docker/Unraid this usually means the broker is unreachable. "
+        "Use the broker's LAN IP or hostname instead."
+    )
 state = load_state([device.topic for device in config.devices])
 local_tz = pytz.timezone("Asia/Kolkata")
 corrected = build_metric()
@@ -199,6 +210,8 @@ device_metrics = {}
 start_http_server(METRICS_PORT)
 log_info(f"🚀 /metrics exposed on :{METRICS_PORT}")
 log_info(f"🧩 Loaded config for {len(config.devices)} device(s) from config.yaml")
+log_info(f"📡 MQTT broker target: {config.mqtt.host}:{config.mqtt.port}")
+log_info(f"🔐 MQTT username set: {'yes' if config.mqtt.username else 'no'}")
 log_debug(f"MQTT broker: {config.mqtt.host}:{config.mqtt.port}")
 for device in config.devices:
     log_debug(
@@ -245,6 +258,10 @@ def on_disconnect(
 ) -> None:
     mqtt_connected.set(0)
     log_info(f"⚠️ MQTT disconnected: {reason_code}")
+
+
+def on_log(client: mqtt.Client, userdata: Any, level: int, buf: str) -> None:
+    log_debug(f"paho[{level}]: {buf}")
 
 
 def on_message(client: mqtt.Client, userdata: Any, msg: mqtt.MQTTMessage) -> None:
@@ -316,6 +333,8 @@ if config.mqtt.username and config.mqtt.password:
 client.on_connect = on_connect
 client.on_disconnect = on_disconnect
 client.on_message = on_message
+if config.debug:
+    client.on_log = on_log
 client.reconnect_delay_set(min_delay=2, max_delay=60)
 client.connect_async(config.mqtt.host, config.mqtt.port, 60)
 client.loop_start()

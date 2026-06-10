@@ -11,7 +11,7 @@ A small MQTT-to-Prometheus exporter that keeps `ENERGY.Today` stable across Tasm
 ## Setup
 
 1. Copy `config.example.yaml` to `config.yaml`.
-2. Fill in your MQTT broker details, device list, and any per-device metadata.
+2. Fill in your MQTT broker details, device list, and any per-device metadata. Use the broker's LAN IP/hostname, not `localhost`, inside Docker/Unraid.
 3. Keep `config.yaml` out of git.
 4. Start the container or run `python main.py`.
 
